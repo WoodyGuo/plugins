@@ -113,7 +113,9 @@
     if (error) {
       result([error flutterError]);
     } else {
-      result(@{@"url" : [shortURL absoluteString], @"warnings" : warnings});
+      NSMutableDictionary* map = @{@"url" : [shortURL absoluteString]};
+      if (nil != warnings) map[@"warnings"] = warnings;
+      result(map);
     }
   };
 }
