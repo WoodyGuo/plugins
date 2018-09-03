@@ -5,6 +5,7 @@
 #import "FirebaseMessagingPlugin.h"
 
 #import "Firebase/Firebase.h"
+#import <UserNotifications/UserNotifications.h>
 
 #if defined(__IPHONE_10_0) && __IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_10_0
 @interface FLTFirebaseMessagingPlugin ()<FIRMessagingDelegate>
@@ -131,7 +132,24 @@
     didReceiveRemoteNotification:(NSDictionary *)userInfo
           fetchCompletionHandler:(void (^)(UIBackgroundFetchResult result))completionHandler {
   [self didReceiveRemoteNotification:userInfo];
-  completionHandler(UIBackgroundFetchResultNoData);
+    //这里做内容的处理需要的内容有 类型， title， body， imageUrl
+    NSDictionary *data = userInfo;
+    if (data && [data objectForKey:@"cate"]) {
+        int64_t cate = [[data objectForKey:@"cate"] longLongValue];
+        if (cate == 103) {
+#ifdef DEBUG
+            NSLog(@"我收到了article 通知");
+#endif
+            NSString *title = [data objectForKey:@"title"];
+            NSString *body = [data objectForKey:@"brief"];
+            NSString *imageUrl = [data objectForKey:@"image"];
+            if (imageUrl) {
+                [self loadAttachmentForUrlString:imageUrl title:title body:body userInfo:data fetchCompletionHandler:completionHandler];
+            }
+        }
+    } else {
+        completionHandler(UIBackgroundFetchResultNoData);
+    }
   return YES;
 }
 
@@ -159,6 +177,77 @@
 - (void)messaging:(nonnull FIRMessaging *)messaging
     didReceiveRegistrationToken:(nonnull NSString *)fcmToken {
   [_channel invokeMethod:@"onToken" arguments:fcmToken];
+}
+
+#pragma 私有方法
+- (void)loadAttachmentForUrlString:(NSString *)urlStr
+                             title:(NSString *)title
+                              body:(NSString *)body
+                          userInfo:(NSDictionary *)userInfo
+            fetchCompletionHandler:(void (^)(UIBackgroundFetchResult))completionHandler {
+#ifdef DEBUG
+    NSLog(@"下载的图片地址%@", urlStr);
+#endif
+    NSString *fileExt = urlStr.pathExtension;
+    NSURL *attachmentURL = [NSURL URLWithString:urlStr];
+    __block UNMutableNotificationContent *content = nil;
+    __block UNNotificationAttachment *img_attachment = nil;
+    __block UNTimeIntervalNotificationTrigger *time_trigger = nil;
+    __block UNNotificationRequest *request = nil;
+    __block UNUserNotificationCenter *notificationCenter = nil;
+    __block NSURLSession *session = [NSURLSession sessionWithConfiguration:[NSURLSessionConfiguration defaultSessionConfiguration]];
+    [[session downloadTaskWithURL:attachmentURL
+                completionHandler:^(NSURL *temporaryFileLocation, NSURLResponse *response, NSError *error) {
+                    if (error != nil) {
+#ifdef DEBUG
+                        NSLog(@"error %@", error.localizedDescription);
+#endif
+                        completionHandler(UIBackgroundFetchResultFailed);
+                    } else {
+#ifdef DEBUG
+                        NSLog(@"下载的图片完成了%@", temporaryFileLocation.path);
+#endif
+                        NSFileManager *fileManager = [NSFileManager defaultManager];
+                        NSURL *localURL = [NSURL fileURLWithPath:[temporaryFileLocation.path
+                                                                  stringByAppendingString:[@"." stringByAppendingString:fileExt]]];
+                        [fileManager moveItemAtURL:temporaryFileLocation toURL:localURL error:&error];
+                        
+                        content = [[UNMutableNotificationContent alloc] init];
+                        content.title = title;
+                        content.body = body;
+                        content.badge = @0;
+                        NSError *attachmentError = nil;
+                        //将本地图片的路径形成一个图片附件，加入到content中
+                        img_attachment = [UNNotificationAttachment attachmentWithIdentifier:@"aricaleImage" URL:localURL options:nil error:&attachmentError];
+                        if (attachmentError) {
+#ifdef DEBUG
+                            NSLog(@"%@", attachmentError);
+#endif
+                            
+                        } else {
+                            content.attachments = @[img_attachment];
+                        }
+                        content.sound =  [UNNotificationSound defaultSound];
+                        content.userInfo = userInfo;
+                        //设置时间间隔的触发器
+                        time_trigger = [UNTimeIntervalNotificationTrigger triggerWithTimeInterval:1 repeats:NO];
+                        NSString *requestIdentifer = @"aircleIndentifer";
+                        request = [UNNotificationRequest requestWithIdentifier:requestIdentifer content:content trigger:time_trigger];
+                        notificationCenter = [UNUserNotificationCenter currentNotificationCenter];
+                        [notificationCenter addNotificationRequest:request withCompletionHandler:^(NSError * _Nullable error) {
+                            if (error){
+#ifdef DEBUG
+                                NSLog(@"error %@",error);
+#endif
+                                completionHandler(UIBackgroundFetchResultFailed);
+                            } else {
+                                completionHandler(UIBackgroundFetchResultNewData);
+                            }
+                        }];
+                    }
+                    
+                }
+      ] resume];
 }
 
 @end
